@@ -4,9 +4,9 @@ use alloc::vec::Vec;
 use esp_hal::{aes::Aes, rng::Rng};
 use thiserror::Error;
 
-const IV_SIZE: usize = 16;
-const AES_BLOCK_SIZE: usize = 16;
-const AES_KEY_SIZE: usize = 32;
+pub const IV_SIZE: usize = 16;
+pub const AES_BLOCK_SIZE: usize = 16;
+pub const AES_KEY_SIZE: usize = 32;
 
 /// Encrypts a packet using AES-256.
 ///
@@ -29,7 +29,7 @@ pub fn encrypt_packet(
         // XOR key with tiled iv_cursor to get packet key
         key_buf[i] = key[i] ^ iv[iv_cursor];
         iv_cursor += 1;
-        if iv_cursor > IV_SIZE {
+        if iv_cursor >= IV_SIZE {
             iv_cursor = 0;
         }
     }
@@ -37,7 +37,7 @@ pub fn encrypt_packet(
     let mut cursor = 0;
 
     // Ensure proper block size and allocate room to add the IV later
-    let padding = packet.len() % AES_BLOCK_SIZE;
+    let padding = AES_BLOCK_SIZE - (packet.len() % AES_BLOCK_SIZE);
     packet.reserve_exact(padding + IV_SIZE);
     for _ in 0..padding {
         packet.push(0);
@@ -55,7 +55,7 @@ pub fn encrypt_packet(
         for i in 0..AES_KEY_SIZE {
             next_key[i] = key_buf[i] ^ packet_block[block_cursor];
             block_cursor += 1;
-            if block_cursor > AES_BLOCK_SIZE {
+            if block_cursor >= AES_BLOCK_SIZE {
                 block_cursor = 0;
             }
         }
@@ -97,7 +97,7 @@ pub fn decrypt_packet<'a>(
     for i in 0..AES_KEY_SIZE {
         key_buf[i] = key[i] ^ iv_buf[iv_cursor];
         iv_cursor += 1;
-        if iv_cursor > IV_SIZE {
+        if iv_cursor >= IV_SIZE {
             iv_cursor = 0;
         }
     }
@@ -119,7 +119,7 @@ pub fn decrypt_packet<'a>(
         for i in 0..AES_KEY_SIZE {
             key_buf[i] = key_buf[i] ^ packet_block[block_cursor];
             block_cursor += 1;
-            if block_cursor > AES_BLOCK_SIZE {
+            if block_cursor >= AES_BLOCK_SIZE {
                 block_cursor = 0;
             }
         }

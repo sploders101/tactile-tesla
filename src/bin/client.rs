@@ -24,7 +24,7 @@ use esp_wifi::{
 };
 use ht16k33::{Dimming, Display, LedLocation, HT16K33};
 
-use esp_now_poc::NowMessage;
+use tactile_tesla::NowMessage;
 
 #[entry]
 fn main() -> ! {

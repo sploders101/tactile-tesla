@@ -15,7 +15,7 @@ const IPAD: u8 = 0x36;
 const OPAD: u8 = 0x5C;
 
 /// Verifies the authenticity of a packet using the cluster key
-pub fn authenticate_packet<'a>(sha_peripheral: &mut Sha<'a>, packet: &'a [u8]) -> Option<&'a [u8]> {
+pub fn authenticate_packet<'a>(sha_peripheral: &mut Sha<'_>, packet: &'a [u8]) -> Option<&'a [u8]> {
     let hmac = &packet[0..HASH_SIZE];
     let data = &packet[HASH_SIZE..];
 

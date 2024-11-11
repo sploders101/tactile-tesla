@@ -16,7 +16,7 @@ use esp_hal::{
     rng::Rng,
     timer::timg::TimerGroup,
 };
-use esp_now_poc::NowMessage;
+use tactile_tesla::NowMessage;
 use esp_println::println;
 use esp_wifi::{
     esp_now::{EspNow, BROADCAST_ADDRESS},

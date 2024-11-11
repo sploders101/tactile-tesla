@@ -1,13 +1,12 @@
 extern crate alloc;
 extern crate core;
-use core::cmp::min;
-
-use alloc::{collections::VecDeque, vec::Vec};
 
 use crate::binary_packets::PacketReader;
+use alloc::{collections::VecDeque, vec::Vec};
+use core::cmp::min;
 
 // 4 bytes for msg_seq, 2 for chunk_seq
-const TOLERANT_PACKET_OVERHEAD: usize = 6;
+pub const TOLERANT_PACKET_OVERHEAD: usize = 6;
 
 /// Disassembles a large packet into smaller ones.
 ///
@@ -22,7 +21,7 @@ pub struct TolerantPacketDisassembler<const MAX_CHUNK_SIZE: usize> {
 }
 impl<const MAX_CHUNK_SIZE: usize> TolerantPacketDisassembler<MAX_CHUNK_SIZE> {
     pub fn new() -> Self {
-        if MAX_CHUNK_SIZE > TOLERANT_PACKET_OVERHEAD + 1 {
+        if MAX_CHUNK_SIZE < TOLERANT_PACKET_OVERHEAD + 1 {
             panic!("Cannot instantiate disassembler. Chunk size too small.");
         }
         return Self { msg_seq: 0 };
@@ -56,8 +55,11 @@ impl<'a, const MAX_CHUNK_SIZE: usize> TolerantPacketIterator<'a, MAX_CHUNK_SIZE>
 
     /// Writes the next data chunk to `chunk`.
     ///
-    /// Returns true if there was data to send, otherwise false.
-    pub fn get_chunk(&mut self, chunk: &mut [u8; MAX_CHUNK_SIZE]) -> bool {
+    /// Returns the number of bytes written, if any.
+    pub fn get_chunk(&mut self, chunk: &mut [u8; MAX_CHUNK_SIZE]) -> Option<usize> {
+        if self.cursor >= self.data.len() {
+            return None;
+        }
         self.chunk_seq += 1;
         let msg_seq_bytes = self.msg_seq.to_be_bytes();
         let chunk_seq_bytes = self.chunk_seq.to_be_bytes();
@@ -73,18 +75,7 @@ impl<'a, const MAX_CHUNK_SIZE: usize> TolerantPacketIterator<'a, MAX_CHUNK_SIZE>
         for (i, chunk_i) in (start_cursor..end_cursor).enumerate() {
             chunk[chunk_i + TOLERANT_PACKET_OVERHEAD] = self.data[i];
         }
-        return end_cursor != self.data.len();
-    }
-}
-impl<'a, const MAX_CHUNK_SIZE: usize> Iterator for TolerantPacketIterator<'a, MAX_CHUNK_SIZE> {
-    type Item = [u8; MAX_CHUNK_SIZE];
-    fn next(&mut self) -> Option<Self::Item> {
-        let mut buffer = [0u8; MAX_CHUNK_SIZE];
-        if self.get_chunk(&mut buffer) {
-            return Some(buffer);
-        } else {
-            return None;
-        }
+        return Some(end_cursor - start_cursor + TOLERANT_PACKET_OVERHEAD);
     }
 }
 
