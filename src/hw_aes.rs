@@ -4,8 +4,8 @@ use alloc::vec::Vec;
 use esp_hal::{aes::Aes, rng::Rng};
 use thiserror::Error;
 
-pub const IV_SIZE: usize = 16;
 pub const AES_BLOCK_SIZE: usize = 16;
+pub const IV_SIZE: usize = AES_BLOCK_SIZE;
 pub const AES_KEY_SIZE: usize = 32;
 
 /// Encrypts a packet using AES-256.
@@ -19,20 +19,9 @@ pub fn encrypt_packet(
     key: &[u8; AES_KEY_SIZE],
     packet: &mut Vec<u8>,
 ) {
-    // Generate IV and calculate initial key
+    // Generate IV
     let mut iv = [0u8; IV_SIZE];
     rng_peripheral.read(&mut iv);
-    let mut key_buf = [0u8; AES_KEY_SIZE];
-    // Avoid expensive modulo in a hot path
-    let mut iv_cursor = 0;
-    for i in 0..AES_KEY_SIZE {
-        // XOR key with tiled iv_cursor to get packet key
-        key_buf[i] = key[i] ^ iv[iv_cursor];
-        iv_cursor += 1;
-        if iv_cursor >= IV_SIZE {
-            iv_cursor = 0;
-        }
-    }
 
     let mut cursor = 0;
 
@@ -44,27 +33,25 @@ pub fn encrypt_packet(
     }
 
     while cursor < packet.len() {
-        let packet_block: &mut [u8; AES_BLOCK_SIZE] = (&mut packet
-            [cursor..cursor + AES_BLOCK_SIZE])
-            .try_into()
-            .unwrap();
-
-        // Calculate next key from unencrypted data
-        let mut next_key = [0u8; AES_KEY_SIZE];
-        let mut block_cursor = 0;
-        for i in 0..AES_KEY_SIZE {
-            next_key[i] = key_buf[i] ^ packet_block[block_cursor];
-            block_cursor += 1;
-            if block_cursor >= AES_BLOCK_SIZE {
-                block_cursor = 0;
+        // Scramble
+        if cursor == 0 {
+            for i in 0..AES_BLOCK_SIZE {
+                // XOR against IV for first packet
+                packet[i] = packet[i] ^ iv[i];
+            }
+        } else {
+            for i in 0..AES_BLOCK_SIZE {
+                // XOR against previous encrypted packet
+                packet[i+cursor] = packet[i+cursor] ^ packet[i+cursor-AES_BLOCK_SIZE];
             }
         }
 
         // Encrypt
-        aes_peripheral.process(packet_block, esp_hal::aes::Mode::Encryption256, key_buf);
-
-        // Set new key
-        key_buf = next_key;
+        let packet_block: &mut [u8; AES_BLOCK_SIZE] = (&mut packet
+            [cursor..cursor + AES_BLOCK_SIZE])
+            .try_into()
+            .unwrap();
+        aes_peripheral.process(packet_block, esp_hal::aes::Mode::Encryption256, key.clone());
 
         // Increment cursor
         cursor += AES_BLOCK_SIZE;
@@ -85,44 +72,40 @@ pub fn decrypt_packet<'a>(
     key: &[u8; AES_KEY_SIZE],
     packet: &'a mut [u8],
 ) -> Result<&'a mut [u8], DecryptionError> {
-    if (packet.len() - IV_SIZE) % AES_BLOCK_SIZE != 0 {
+    if packet.len() % AES_BLOCK_SIZE != 0 {
         return Err(DecryptionError::InvalidLength);
     }
 
-    // Calculate starting key from key and packet iv
-    let mut key_buf = [0u8; AES_KEY_SIZE];
+    // Get IV offset
     let iv_start = packet.len() - IV_SIZE;
-    let iv_buf: &[u8; IV_SIZE] = packet[iv_start..].try_into().unwrap();
-    let mut iv_cursor = 0;
-    for i in 0..AES_KEY_SIZE {
-        key_buf[i] = key[i] ^ iv_buf[iv_cursor];
-        iv_cursor += 1;
-        if iv_cursor >= IV_SIZE {
-            iv_cursor = 0;
-        }
+
+    // Set up vector for CBC
+    let mut prev_encrypted_block = [0u8; IV_SIZE];
+    for i in 0..IV_SIZE {
+        prev_encrypted_block[i] = packet[iv_start + i];
     }
 
     let packet: &mut [u8] = &mut packet[0..iv_start];
 
     let mut cursor = 0;
+
     while cursor < packet.len() {
         let packet_block: &mut [u8; AES_BLOCK_SIZE] = (&mut packet
             [cursor..cursor + AES_BLOCK_SIZE])
             .try_into()
             .unwrap();
+        let encrypted_packet_block = packet_block.clone();
 
         // Decrypt
-        aes_peripheral.process(packet_block, esp_hal::aes::Mode::Decryption256, key_buf);
+        aes_peripheral.process(packet_block, esp_hal::aes::Mode::Decryption256, key.clone());
 
-        // Generate new key from decrypted data
-        let mut block_cursor = 0;
-        for i in 0..AES_KEY_SIZE {
-            key_buf[i] = key_buf[i] ^ packet_block[block_cursor];
-            block_cursor += 1;
-            if block_cursor >= AES_BLOCK_SIZE {
-                block_cursor = 0;
-            }
+        // Unscramble
+        for i in 0..AES_BLOCK_SIZE {
+            packet_block[i] = packet_block[i] ^ prev_encrypted_block[i];
         }
+
+        // Save encrypted block for next iteration
+        prev_encrypted_block = encrypted_packet_block;
 
         // Increment cursor
         cursor += AES_BLOCK_SIZE;
