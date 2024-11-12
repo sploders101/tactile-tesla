@@ -3,8 +3,6 @@ extern crate core;
 use alloc::vec::Vec;
 use core::str::{self, Utf8Error};
 
-use crate::packet_types::CLUSTER_ID;
-
 #[derive(Debug, Clone)]
 pub enum PacketWriteError {
     /// The data is too large to include in the packet
@@ -18,12 +16,6 @@ pub struct PacketWriter {
 impl PacketWriter {
     pub fn new() -> Self {
         return Self { packet: Vec::new() };
-    }
-
-    pub fn write_cluster_id(&mut self) {
-        for byte in CLUSTER_ID {
-            self.write_u8(*byte);
-        }
     }
 
     pub fn write_u8(&mut self, num: u8) {
@@ -67,8 +59,8 @@ impl PacketWriter {
         self.packet.extend_from_slice(bytes);
         return Ok(());
     }
-    pub fn write_str(&mut self, string: &str) {
-        self.write_bytes(string.as_bytes());
+    pub fn write_str(&mut self, string: &str) -> Result<(), PacketWriteError> {
+        return self.write_bytes(string.as_bytes());
     }
 
     pub fn finish(self) -> Vec<u8> {
@@ -84,19 +76,6 @@ pub struct PacketReader<'a> {
 impl<'a> PacketReader<'a> {
     pub fn new(packet: &'a [u8]) -> Self {
         return Self { cursor: 0, packet };
-    }
-
-    pub fn verify_cluster_id(&mut self) -> bool {
-        for id_byte in CLUSTER_ID {
-            if let Some(rx_byte) = self.read_u8() {
-                if rx_byte != *id_byte {
-                    return false;
-                }
-            } else {
-                return false;
-            }
-        }
-        return true;
     }
 
     pub fn read_u8(&mut self) -> Option<u8> {

@@ -3,6 +3,7 @@ extern crate core;
 
 use crate::binary_packets::PacketReader;
 use alloc::{collections::VecDeque, vec::Vec};
+use esp_println::println;
 use core::cmp::min;
 
 // 4 bytes for msg_seq, 2 for chunk_seq
@@ -35,6 +36,7 @@ impl<const MAX_CHUNK_SIZE: usize> TolerantPacketDisassembler<MAX_CHUNK_SIZE> {
         return TolerantPacketIterator::<'a, MAX_CHUNK_SIZE> {
             msg_seq: self.msg_seq,
             chunk_seq: 0,
+            sent_length: false,
             cursor: 0,
             data: packet,
         };
@@ -47,6 +49,7 @@ impl<const MAX_CHUNK_SIZE: usize> TolerantPacketDisassembler<MAX_CHUNK_SIZE> {
 pub struct TolerantPacketIterator<'a, const MAX_CHUNK_SIZE: usize> {
     msg_seq: u32,
     chunk_seq: u16,
+    sent_length: bool,
     cursor: usize,
     data: &'a [u8],
 }
@@ -69,13 +72,35 @@ impl<'a, const MAX_CHUNK_SIZE: usize> TolerantPacketIterator<'a, MAX_CHUNK_SIZE>
         for i in 0..chunk_seq_bytes.len() {
             chunk[i + msg_seq_bytes.len()] = chunk_seq_bytes[i];
         }
+
+        let prepended_bytes = if self.sent_length {
+            0
+        } else {
+            let length = self.data.len() as u16;
+            let length_bytes = length.to_be_bytes();
+            chunk[TOLERANT_PACKET_OVERHEAD] = length_bytes[0];
+            chunk[TOLERANT_PACKET_OVERHEAD + 1] = length_bytes[1];
+            2
+        };
+
+        // for i in 0..Self::ADVANCE_COUNT - prepended_bytes {
+        //     let chunk_i = self.cursor + i;
+        //     if chunk_i >= self.data.len() {
+        //         self.cursor = self.data.len();
+        //         return Some(i + TOLERANT_PACKET_OVERHEAD);
+        //     }
+        //     chunk[i + TOLERANT_PACKET_OVERHEAD + prepended_bytes] = self.data[chunk_i];
+        // }
+        // self.cursor += Self::ADVANCE_COUNT - prepended_bytes;
+        // return Some(Self::ADVANCE_COUNT - prepended_bytes + TOLERANT_PACKET_OVERHEAD);
+
         let start_cursor = self.cursor;
-        let end_cursor = min(self.cursor + Self::ADVANCE_COUNT, self.data.len());
+        let end_cursor = min(self.cursor + Self::ADVANCE_COUNT - prepended_bytes, self.data.len());
         self.cursor = end_cursor;
         for (i, chunk_i) in (start_cursor..end_cursor).enumerate() {
-            chunk[chunk_i + TOLERANT_PACKET_OVERHEAD] = self.data[i];
+            chunk[i + TOLERANT_PACKET_OVERHEAD + prepended_bytes] = self.data[chunk_i];
         }
-        return Some(end_cursor - start_cursor + TOLERANT_PACKET_OVERHEAD);
+        return Some(end_cursor - start_cursor + TOLERANT_PACKET_OVERHEAD + prepended_bytes);
     }
 }
 
@@ -86,12 +111,12 @@ impl<'a, const MAX_CHUNK_SIZE: usize> TolerantPacketIterator<'a, MAX_CHUNK_SIZE>
 /// not request retransmission.
 ///
 /// This is the receiving end of `TolerantPacketDisassembler`.
-pub struct TolerantPacketReassembler {
+pub struct TolerantPacketAssembler {
     msg_seq: u32,
     chunk_seq: u16,
     assembler: PacketAssembler,
 }
-impl TolerantPacketReassembler {
+impl TolerantPacketAssembler {
     pub fn new() -> Self {
         return Self {
             msg_seq: 0,
@@ -113,16 +138,19 @@ impl TolerantPacketReassembler {
         let data = packet_reader.get_remainder();
 
         // Skip repeated messages
-        if self.msg_seq >= msg_seq || self.chunk_seq >= chunk_seq {
+        if msg_seq < self.msg_seq {
             return;
         }
 
         // If we found a new message, clear the buffers of incomplete ones
-        if self.msg_seq < msg_seq {
+        if msg_seq > self.msg_seq {
             self.msg_seq = msg_seq;
             self.chunk_seq = 0;
             self.assembler.expected_size = ExpectedSize::None;
             self.assembler.buffer = Vec::new();
+        } else if msg_seq == self.msg_seq && chunk_seq <= self.chunk_seq {
+            // Skip chunks we've already seen
+            return;
         }
 
         // If we missed a packet, don't keep trying to parse the message
@@ -135,13 +163,14 @@ impl TolerantPacketReassembler {
     }
 }
 
-impl Iterator for TolerantPacketReassembler {
+impl Iterator for TolerantPacketAssembler {
     type Item = Vec<u8>;
     fn next(&mut self) -> Option<Self::Item> {
         return self.assembler.next();
     }
 }
 
+#[derive(Debug, Clone)]
 enum ExpectedSize {
     None,
     Partial(u8),
@@ -205,6 +234,7 @@ impl PacketAssembler {
                     }
                 }
             }
+            break;
         }
     }
 }

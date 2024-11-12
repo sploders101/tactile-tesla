@@ -11,12 +11,5 @@ pub mod binary_packets;
 pub mod hw_aes;
 pub mod hw_hmac;
 pub mod packet_manager;
-pub mod packet_types;
 pub mod packetizer;
-
-use bincode::{Decode, Encode};
-
-#[derive(Encode, Decode, Debug, Clone)]
-pub enum NowMessage {
-    Speedometer { speed: u16 },
-}
+pub mod packet_types;

@@ -10,15 +10,10 @@
 
 use esp_alloc as _;
 use esp_backtrace as _;
-use esp_hal::{
-    aes::Aes, gpio::{Input, Io, Pull}, prelude::*, rng::Rng, sha::Sha, timer::timg::TimerGroup
-};
-use tactile_tesla::packet_manager::commander::CommanderPacketManager;
+use esp_hal::{aes::Aes, prelude::*, rng::Rng, sha::Sha, timer::timg::TimerGroup};
 use esp_println::println;
-use esp_wifi::{
-    esp_now::{EspNow, BROADCAST_ADDRESS},
-    init, EspWifiInitFor,
-};
+use esp_wifi::{init, EspWifiInitFor};
+use tactile_tesla::packet_manager::{PacketManager, Role};
 
 #[entry]
 fn main() -> ! {
@@ -49,8 +44,8 @@ fn main() -> ! {
 
     println!("esp-now version {}", esp_now.get_version().unwrap());
 
-    let mut manager = CommanderPacketManager::new(esp_now);
+    let mut manager = PacketManager::new(esp_now);
     loop {
-        manager.tick(&mut aes, &mut sha, &mut rng);
+        manager.tick(&mut aes, &mut sha, &mut rng, Role::Commander);
     }
 }

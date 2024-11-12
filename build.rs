@@ -14,16 +14,6 @@ fn main() {
     println!("cargo:rustc-link-arg-bins=-Trom_functions.x");
     println!("cargo::rerun-if-changed=build.rs");
 
-    // Create cluster ID
-    if !std::fs::exists("keys/cluster_id.dat").unwrap() {
-        let mut cluster_id = [0u8; 6];
-        let mut rng = rand::thread_rng();
-        rng.fill_bytes(&mut cluster_id);
-
-        let mut file = File::create_new("keys/cluster_id.dat").unwrap();
-        file.write_all(&cluster_id).unwrap();
-    }
-
     // Create cluster secret
     println!("cargo::rerun-if-changed=keys/cluster_key.dat");
     match std::fs::File::create_new("keys/cluster_key.dat") {

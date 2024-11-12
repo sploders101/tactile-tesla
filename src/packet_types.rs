@@ -1,52 +1,83 @@
 extern crate alloc;
-extern crate core;
 
-use crate::binary_packets::{PacketReader, PacketWriter};
+use alloc::string::String;
+use crate::{
+    binary_packets::{PacketReader, PacketWriteError, PacketWriter},
+    packet_manager::Role,
+};
 
-pub static CLUSTER_ID: &'static [u8; 6] = include_bytes!("../keys/cluster_id.dat");
-
-pub trait Transmittable: Sized + Sync + Send + 'static {
-    fn encode(&self, builder: &mut PacketWriter);
-    fn decode(extractor: &mut PacketReader) -> Option<Self>;
+pub trait Transmittable: Sized {
+    fn encode(&self, packet_writer: &mut PacketWriter) -> Result<(), PacketWriteError>;
+    fn decode(packet_reader: &mut PacketReader) -> Option<Self>;
 }
 
-pub enum BcastMessageType {
-    Discovery,
-}
-impl Transmittable for BcastMessageType {
-    fn encode(&self, builder: &mut PacketWriter) {
+impl Transmittable for Role {
+    fn encode(&self, packet_writer: &mut PacketWriter) -> Result<(), PacketWriteError> {
         match self {
-            Self::Discovery => {
-                builder.write_u8(1);
-                // Add cluster ID to packet to help reduce noise
-                // on the receiving end.
-                for byte in CLUSTER_ID {
-                    builder.write_u8(*byte);
-                }
+            Self::Commander => {
+                packet_writer.write_u8(0);
+            }
+            Self::Node => {
+                packet_writer.write_u8(1);
             }
         }
+        return Ok(());
     }
-    fn decode(reader: &mut PacketReader) -> Option<Self> {
-        match reader.read_u8()? {
-            1 => {
-                // Check that this device is part of our cluster
-                // before accepting the discovery packet.
-                for i in 0..CLUSTER_ID.len() {
-                    let byte = reader.read_u8()?;
-                    if byte != CLUSTER_ID[i] {
-                        return None;
-                    }
-                }
-                Some(Self::Discovery)
-            }
+    fn decode(packet_reader: &mut PacketReader) -> Option<Self> {
+        match packet_reader.read_u8()? {
+            0 => Some(Self::Commander),
+            1 => Some(Self::Node),
             _ => None,
         }
     }
 }
 
-pub enum UnicastMessageType {
-    /// Contains data from the peripheral to be signed and returned
-    AuthChallenge([u8; 256]),
-    /// Contains plain-text data as a response to a challenge
-    AuthResponse([u8; 200]),
+#[derive(Debug, Clone)]
+pub enum CommPacket {
+    Heartbeat(Heartbeat),
+}
+impl Transmittable for CommPacket {
+    fn encode(&self, packet_writer: &mut PacketWriter) -> Result<(), PacketWriteError> {
+        match self {
+            Self::Heartbeat(heartbeat) => {
+                packet_writer.write_u8(0);
+                return heartbeat.encode(packet_writer);
+            }
+        }
+    }
+    fn decode(packet_reader: &mut PacketReader) -> Option<Self> {
+        match packet_reader.read_u8()? {
+            0 => Some(Self::Heartbeat(Heartbeat::decode(packet_reader)?)),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Heartbeat {
+    pub car_name: Option<String>,
+}
+impl Transmittable for Heartbeat {
+    fn encode(&self, packet_writer: &mut PacketWriter) -> Result<(), PacketWriteError> {
+        match self.car_name {
+            None => {
+                packet_writer.write_u8(0);
+            }
+            Some(ref car_name) => {
+                packet_writer.write_u8(1);
+                packet_writer.write_str(car_name.as_str())?;
+            }
+        }
+        return Ok(());
+    }
+    fn decode(packet_reader: &mut PacketReader) -> Option<Self> {
+        let car_name = match packet_reader.read_u8()? {
+            0 => None,
+            1 => Some(String::from(packet_reader.read_str()?.ok()?)),
+            _ => return None,
+        };
+        return Some(Self {
+            car_name,
+        });
+    }
 }
